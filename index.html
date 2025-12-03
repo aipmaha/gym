@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>HybridFit</title>
+    
+    <!-- Externe Bibliotheken -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Wir nutzen explizit die UMD Version von Lucide für Browser-Support -->
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+
+    <style>
+        body { overscroll-behavior-y: none; -webkit-tap-highlight-color: transparent; }
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+        .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+        input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+    </style>
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'sans-serif'] },
+                    animation: { 'fade-in': 'fadeIn 0.3s ease-in-out' },
+                    keyframes: { fadeIn: { '0%': { opacity: '0' }, '100%': { opacity: '1' } } }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-zinc-950 text-zinc-100 min-h-screen">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // --- ICON KOMPONENTE (Fixed for Lucide v0.263+) ---
+        const Icon = ({ name, size = 24, className = "" }) => {
+            const iconRef = useRef(null);
+            
+            useEffect(() => {
+                const lucide = window.lucide;
+                // Prüfen ob Lucide geladen ist und das Icon existiert
+                if (lucide && lucide.icons && lucide.icons[name] && iconRef.current) {
+                    
+                    // Container leeren
+                    iconRef.current.innerHTML = '';
+
+                    // SVG Element erstellen
+                    const svgElement = lucide.createElement(lucide.icons[name]);
+
+                    // Attribute setzen
+                    svgElement.setAttribute('width', size);
+                    svgElement.setAttribute('height', size);
+                    
+                    // Standard Lucide Attribute sicherstellen
+                    svgElement.setAttribute('stroke', 'currentColor');
+                    svgElement.setAttribute('stroke-width', '2');
+                    
+                    // Ins DOM einfügen
+                    iconRef.current.appendChild(svgElement);
+                }
+            }, [name, size]);
+
+            return <span ref={iconRef} className={`flex items-center justify-center ${className}`} />;
+        };
+
+        // --- UI COMPONENTS ---
+        const Button = ({ children, onClick, variant = 'primary', className = '', disabled = false }) => {
+            const baseStyle = "flex items-center justify-center px-4 py-3 rounded-xl font-semibold transition-all active:scale-95 disabled:opacity-50 disabled:pointer-events-none select-none";
+            const variants = {
+                primary: "bg-blue-600 text-white shadow-lg shadow-blue-500/30 hover:bg-blue-500",
+                secondary: "bg-zinc-800 text-zinc-300 border border-zinc-700 hover:bg-zinc-700",
+                success: "bg-emerald-600 text-white shadow-lg shadow-emerald-500/30 hover:bg-emerald-500",
+                danger: "bg-red-500/10 text-red-500 border border-red-500/20 hover:bg-red-500/20",
+                ghost: "bg-transparent text-zinc-400 hover:text-white"
+            };
+
+            return (
+                <button onClick={onClick} disabled={disabled} className={`${baseStyle} ${variants[variant]} ${className}`}>
+                    {children}
+                </button>
+            );
+        };
+
+        const Input = ({ label, value, onChange, placeholder, type = "text" }) => (
+            <div className="flex flex-col gap-1 w-full">
+                <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">{label}</label>
+                <input
+                    type={type}
+                    value={value}
+                    onChange={(e) => onChange(e.target.value)}
+                    placeholder={placeholder}
+                    className="w-full bg-zinc-900 border border-zinc-800 text-white rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition-all placeholder-zinc-600"
+                />
+            </div>
+        );
+
+        const formatTime = (seconds) => {
+            const mins = Math.floor(seconds / 60);
+            const secs = seconds % 60;
+            return `${mins}:${secs.toString().padStart(2, '0')}`;
+        };
+
+        // --- CHARTS ---
+        const SimpleChart = ({ data, color = "#3b82f6", unit = "kg" }) => {
+            if (!data || data.length < 2) return <div className="h-32 flex items-center justify-center text-zinc-600 text-sm">Zu wenig Daten</div>;
+
+            const height = 100;
+            const width = 300;
+            const padding = 10;
+            
+            const values = data.map(d => d.value);
+            const min = Math.min(...values) * 0.9;
+            const max = Math.max(...values) * 1.1;
+            const range = max - min || 1;
+
+            const points = data.map((d, i) => {
+                const x = (i / (data.length - 1)) * (width - 2 * padding) + padding;
+                const y = height - ((d.value - min) / range) * (height - 2 * padding) - padding;
+                return `${x},${y}`;
+            }).join(' ');
+
+            return (
+                <div className="w-full select-none">
+                    <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-32 overflow-visible">
+                        <polyline fill="none" stroke={color} strokeWidth="3" points={points} strokeLinecap="round" strokeLinejoin="round" />
+                        {data.map((d, i) => {
+                            const x = (i / (data.length - 1)) * (width - 2 * padding) + padding;
+                            const y = height - ((d.value - min) / range) * (height - 2 * padding) - padding;
+                            return (
+                                <g key={i}>
+                                    <circle cx={x} cy={y} r="4" fill="#18181b" stroke={color} strokeWidth="2" />
+                                    {(i === data.length - 1 || data.length <= 5) && (
+                                        <text x={x} y={y - 10} textAnchor="middle" fill="white" fontSize="10" fontWeight="bold">{d.value}</text>
+                                    )}
+                                </g>
+                            )
+                        })}
+                    </svg>
+                </div>
+            );
+        };
+
+        // --- MAIN APP ---
+        function App() {
+            const [plans, setPlans] = useState([]);
+            const [history, setHistory] = useState([]);
+            const [activeView, setActiveView] = useState('list');
+            const [currentPlan, setCurrentPlan] = useState(null);
+            const [editingPlanId, setEditingPlanId] = useState(null);
+            
+            // Workout State
+            const [elapsedTime, setElapsedTime] = useState(0);
+            const [restTimer, setRestTimer] = useState({ active: false, timeLeft: 0, initial: 90 });
+            const timerRef = useRef(null);
+            const restIntervalRef = useRef(null);
+
+            // Init & Load
+            useEffect(() => {
+                try {
+                    const savedPlans = localStorage.getItem('hybridFitPlans');
+                    const savedHistory = localStorage.getItem('hybridFitHistory');
+                    if (savedPlans) setPlans(JSON.parse(savedPlans));
+                    else setPlans([{ id: Date.now(), name: "Oberkörper Hybrid", exercises: [{ id: 1, name: "Muscle Ups", type: "calisthenics", sets: "3", reps: "5", weight: "0" }] }]);
+                    if (savedHistory) setHistory(JSON.parse(savedHistory));
+                } catch(e) { console.error("Load Error", e); }
+            }, []);
+
+            useEffect(() => { localStorage.setItem('hybridFitPlans', JSON.stringify(plans)); }, [plans]);
+            useEffect(() => { 
+                try { localStorage.setItem('hybridFitHistory', JSON.stringify(history)); } 
+                catch(e) { alert("Speicher voll! Bitte alte Verläufe löschen."); }
+            }, [history]);
+
+            // Timer Logic
+            useEffect(() => {
+                if (activeView === 'active' && !timerRef.current) {
+                    timerRef.current = setInterval(() => setElapsedTime(p => p + 1), 1000);
+                } else if (activeView !== 'active' && timerRef.current) {
+                    clearInterval(timerRef.current);
+                    timerRef.current = null;
+                }
+                return () => clearInterval(timerRef.current);
+            }, [activeView]);
+
+            // Rest Timer
+            useEffect(() => {
+                if (restTimer.active && restTimer.timeLeft > 0) {
+                    restIntervalRef.current = setInterval(() => setRestTimer(p => p.timeLeft <= 1 ? { ...p, active: false } : { ...p, timeLeft: p.timeLeft - 1 }), 1000);
+                } else { clearInterval(restIntervalRef.current); }
+                return () => clearInterval(restIntervalRef.current);
+            }, [restTimer.active, restTimer.timeLeft]);
+
+            // --- FUNCTIONS ---
+            const createNewPlan = () => { setCurrentPlan({ id: Date.now(), name: "", exercises: [] }); setEditingPlanId(null); setActiveView('edit'); };
+            
+            const editPlan = (plan) => { setCurrentPlan({ ...plan }); setEditingPlanId(plan.id); setActiveView('edit'); };
+            
+            const startWorkout = (plan) => {
+                const activeExercises = plan.exercises.map(ex => ({
+                    ...ex,
+                    setsData: Array.from({ length: parseInt(ex.sets) || 3 }).map((_, i) => ({
+                        id: Date.now() + Math.random(), setNumber: i + 1, reps: ex.reps, weight: ex.weight || '0', completed: false
+                    }))
+                }));
+                setCurrentPlan({ ...plan, exercises: activeExercises });
+                setElapsedTime(0);
+                setActiveView('active');
+            };
+
+            const finishWorkout = () => setActiveView('summary');
+
+            const saveHistory = (imageUrl, bodyWeight) => {
+                const completedSets = currentPlan.exercises.reduce((acc, ex) => acc + ex.setsData.filter(s => s.completed).length, 0);
+                const totalSets = currentPlan.exercises.reduce((acc, ex) => acc + ex.setsData.length, 0);
+                
+                const entry = {
+                    id: Date.now(),
+                    date: new Date().toISOString(),
+                    planName: currentPlan.name,
+                    duration: elapsedTime,
+                    setsCompleted: `${completedSets}/${totalSets}`,
+                    image: imageUrl,
+                    bodyWeight: bodyWeight,
+                    exercises: currentPlan.exercises.map(ex => ({ name: ex.name, type: ex.type, setsData: ex.setsData.filter(s => s.completed) }))
+                };
+                setHistory([entry, ...history]);
+                setActiveView('list');
+            };
+
+            const saveCurrentPlan = () => {
+                if (!currentPlan.name.trim()) return alert("Name fehlt!");
+                setPlans(prev => editingPlanId ? prev.map(p => p.id === editingPlanId ? currentPlan : p) : [...prev, { ...currentPlan, id: Date.now() }]);
+                setActiveView('list');
+            };
+
+            // --- VIEWS ---
+            const ListView = () => (
+                <div className="space-y-6 pb-24">
+                    <header className="flex justify-between items-start mb-4">
+                        <div><h1 className="text-3xl font-bold text-white">Dein Training</h1><p className="text-zinc-400">Hybrid Calisthenics</p></div>
+                        <div className="flex gap-2">
+                            <button onClick={() => setActiveView('progress')} className="bg-zinc-800 p-3 rounded-full text-zinc-400 hover:text-blue-400 border border-zinc-700"><Icon name="TrendingUp" /></button>
+                            <button onClick={() => setActiveView('history')} className="bg-zinc-800 p-3 rounded-full text-zinc-400 hover:text-white border border-zinc-700"><Icon name="History" /></button>
+                        </div>
+                    </header>
+                    <div className="grid gap-4">
+                        {plans.map(plan => (
+                            <div key={plan.id} className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 active:scale-[0.99] transition-transform">
+                                <div className="flex justify-between items-start mb-4">
+                                    <h3 className="text-xl font-bold text-white">{plan.name}</h3>
+                                    <div className="flex gap-2">
+                                        <button onClick={() => editPlan(plan)} className="p-2 text-zinc-400 bg-zinc-800 rounded-lg"><Icon name="Settings" size={18} /></button>
+                                        <button onClick={() => confirm("Löschen?") && setPlans(plans.filter(p => p.id !== plan.id))} className="p-2 text-zinc-400 bg-zinc-800 rounded-lg"><Icon name="Trash2" size={18} /></button>
+                                    </div>
+                                </div>
+                                <Button onClick={() => startWorkout(plan)} className="w-full gap-2"><Icon name="Play" size={18} /> Starten</Button>
+                            </div>
+                        ))}
+                    </div>
+                    {plans.length === 0 && <div className="text-center py-20 text-zinc-500 border border-dashed border-zinc-800 rounded-xl">Keine Pläne vorhanden</div>}
+                    <div className="fixed bottom-6 right-6 left-6"><Button onClick={createNewPlan} className="w-full py-4 text-lg"><Icon name="Plus" className="mr-2"/> Neuer Plan</Button></div>
+                </div>
+            );
+
+            const EditView = () => {
+                const [newEx, setNewEx] = useState({ name: '', type: 'calisthenics', sets: '3', reps: '10', weight: '' });
+                const addEx = () => { if(newEx.name) { setCurrentPlan(p => ({...p, exercises: [...p.exercises, {...newEx, id: Date.now()}]})); setNewEx({...newEx, name: ''}); }};
+                return (
+                    <div className="space-y-6 pb-32">
+                        <div className="flex items-center gap-4 mb-2"><button onClick={() => setActiveView('list')} className="text-zinc-400"><Icon name="ChevronLeft" size={32}/></button><h2 className="text-2xl font-bold">Plan bearbeiten</h2></div>
+                        <Input label="Name" value={currentPlan.name} onChange={v => setCurrentPlan(p => ({...p, name: v}))} placeholder="z.B. Push Day" />
+                        <div className="space-y-3">
+                            {currentPlan.exercises.map(ex => (
+                                <div key={ex.id} className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 flex justify-between items-center">
+                                    <div className="flex gap-3 items-center">
+                                        <div className={`p-2 rounded-lg ${ex.type === 'calisthenics' ? 'bg-blue-500/20 text-blue-400' : 'bg-emerald-500/20 text-emerald-400'}`}><Icon name={ex.type === 'calisthenics' ? 'PersonStanding' : 'Dumbbell'} size={20}/></div>
+                                        <div><div className="font-bold">{ex.name}</div><div className="text-xs text-zinc-400">{ex.sets}x{ex.reps} {ex.weight}</div></div>
+                                    </div>
+                                    <button onClick={() => setCurrentPlan(p => ({...p, exercises: p.exercises.filter(e => e.id !== ex.id)}))} className="text-zinc-600"><Icon name="Trash2" size={18}/></button>
+                                </div>
+                            ))}
+                        </div>
+                        <div className="bg-zinc-800/50 border border-zinc-700/50 rounded-2xl p-5 space-y-4">
+                            <div className="grid grid-cols-2 gap-2 bg-zinc-900 p-1 rounded-xl">
+                                <button onClick={() => setNewEx({...newEx, type: 'calisthenics'})} className={`py-2 px-3 rounded-lg text-sm font-medium flex gap-2 justify-center ${newEx.type === 'calisthenics' ? 'bg-zinc-800 text-blue-400' : 'text-zinc-500'}`}><Icon name="PersonStanding" size={16}/> Body</button>
+                                <button onClick={() => setNewEx({...newEx, type: 'weight'})} className={`py-2 px-3 rounded-lg text-sm font-medium flex gap-2 justify-center ${newEx.type === 'weight' ? 'bg-zinc-800 text-emerald-400' : 'text-zinc-500'}`}><Icon name="Dumbbell" size={16}/> Weight</button>
+                            </div>
+                            <Input label="Übung" value={newEx.name} onChange={v => setNewEx({...newEx, name: v})} placeholder="Name" />
+                            <div className="grid grid-cols-3 gap-3">
+                                <Input label="Sets" value={newEx.sets} onChange={v => setNewEx({...newEx, sets: v})} placeholder="3" />
+                                <Input label="Reps" value={newEx.reps} onChange={v => setNewEx({...newEx, reps: v})} placeholder="10" />
+                                <Input label="Kg" value={newEx.weight} onChange={v => setNewEx({...newEx, weight: v})} placeholder="0" />
+                            </div>
+                            <Button onClick={addEx} variant="secondary" className="w-full">Hinzufügen</Button>
+                        </div>
+                        <div className="fixed bottom-0 left-0 right-0 p-4 bg-zinc-950/90 backdrop-blur"><Button onClick={saveCurrentPlan} className="w-full">Speichern</Button></div>
+                    </div>
+                );
+            };
+
+            const ActiveView = () => {
+                const updateSet = (exId, sId, f, v) => setCurrentPlan(p => ({...p, exercises: p.exercises.map(ex => ex.id === exId ? {...ex, setsData: ex.setsData.map(s => s.id === sId ? {...s, [f]: v} : s)} : ex)}));
+                const toggle = (exId, sId) => { const s = currentPlan.exercises.find(e => e.id === exId).setsData.find(ss => ss.id === sId); updateSet(exId, sId, 'completed', !s.completed); };
+                const adj = (exId, sId, f, d) => { const s = currentPlan.exercises.find(e => e.id === exId).setsData.find(ss => ss.id === sId); updateSet(exId, sId, f, Math.max(0, parseFloat(s[f]||0) + d)); };
+                
+                return (
+                    <div className="space-y-6 pb-32">
+                        <div className="flex items-center justify-between sticky top-0 bg-zinc-950/95 py-4 z-10 border-b border-zinc-800">
+                            <div className="flex items-center gap-2"><button onClick={() => confirm("Abbrechen?") && setActiveView('list')} className="text-zinc-400"><Icon name="X"/></button><h2 className="font-bold truncate w-32">{currentPlan.name}</h2></div>
+                            <div className="font-mono bg-zinc-900 px-3 py-1 rounded-full border border-zinc-800 text-sm flex gap-2 items-center"><Icon name="Clock" size={14} className="text-blue-500"/>{formatTime(elapsedTime)}</div>
+                        </div>
+                        {currentPlan.exercises.map(ex => (
+                            <div key={ex.id} className="animate-fade-in">
+                                <h3 className="font-bold mb-2 flex gap-2 items-center"><Icon name={ex.type === 'calisthenics' ? 'PersonStanding' : 'Dumbbell'} size={18} className={ex.type === 'calisthenics' ? 'text-blue-400' : 'text-emerald-400'}/> {ex.name}</h3>
+                                <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+                                    <div className="grid grid-cols-[30px_1fr_1fr_30px_30px] gap-2 px-3 py-2 bg-zinc-800/50 text-xs text-zinc-400 text-center font-bold"><div>#</div><div>KG</div><div>REPS</div><div>OK</div><div>P</div></div>
+                                    {ex.setsData.map((s, idx) => (
+                                        <div key={s.id} className={`grid grid-cols-[30px_1fr_1fr_30px_30px] gap-2 p-3 items-center border-t border-zinc-800 ${s.completed ? 'bg-emerald-900/10' : ''}`}>
+                                            <div className="text-center text-sm text-zinc-500">{idx+1}</div>
+                                            <div className="flex bg-zinc-950 rounded border border-zinc-800"><button onClick={() => adj(ex.id, s.id, 'weight', -1.25)} className="w-6 text-zinc-500">-</button><input type="number" value={s.weight} onChange={e => updateSet(ex.id, s.id, 'weight', e.target.value)} className="w-full bg-transparent text-center text-sm"/><button onClick={() => adj(ex.id, s.id, 'weight', 1.25)} className="w-6 text-zinc-500">+</button></div>
+                                            <div className="flex bg-zinc-950 rounded border border-zinc-800"><button onClick={() => adj(ex.id, s.id, 'reps', -1)} className="w-6 text-zinc-500">-</button><input type="number" value={s.reps} onChange={e => updateSet(ex.id, s.id, 'reps', e.target.value)} className="w-full bg-transparent text-center text-sm"/><button onClick={() => adj(ex.id, s.id, 'reps', 1)} className="w-6 text-zinc-500">+</button></div>
+                                            <button onClick={() => toggle(ex.id, s.id)} className={`flex justify-center ${s.completed ? 'text-emerald-500' : 'text-zinc-600'}`}><Icon name={s.completed ? 'CheckCircle2' : 'Circle'} size={24}/></button>
+                                            <button onClick={() => setRestTimer({active: true, timeLeft: 90, initial: 90})} className="flex justify-center text-zinc-600 active:text-blue-500"><Icon name="Clock" size={20}/></button>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        ))}
+                        <div className="fixed bottom-0 left-0 right-0 p-4 bg-zinc-950/90 backdrop-blur"><Button onClick={finishWorkout} variant="success" className="w-full">Beenden</Button></div>
+                        {restTimer.active && (
+                            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur">
+                                <div className="text-center">
+                                    <div className="text-zinc-400 text-sm mb-4 uppercase tracking-widest">Pause</div>
+                                    <div className="text-8xl font-mono font-bold mb-8">{formatTime(restTimer.timeLeft)}</div>
+                                    <div className="flex gap-4 justify-center">
+                                        <button onClick={() => setRestTimer(p => ({...p, timeLeft: p.timeLeft + 30}))} className="px-6 py-3 bg-zinc-800 rounded-xl">+30s</button>
+                                        <button onClick={() => setRestTimer(p => ({...p, active: false}))} className="px-6 py-3 bg-red-900/20 text-red-500 rounded-xl">Skip</button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                );
+            };
+
+            const SummaryView = () => {
+                const [img, setImg] = useState(null);
+                const [bw, setBw] = useState('');
+                
+                // --- IMAGE COMPRESSION FIX ---
+                const handleImg = (e) => {
+                    const file = e.target.files[0];
+                    if(file){
+                        const reader = new FileReader();
+                        reader.onload = (ev) => {
+                            const image = new Image();
+                            image.onload = () => {
+                                const canvas = document.createElement('canvas');
+                                const MAX = 600; // Resize to max 600px width
+                                const scale = MAX / image.width;
+                                if (scale < 1) {
+                                    canvas.width = MAX;
+                                    canvas.height = image.height * scale;
+                                } else {
+                                    canvas.width = image.width;
+                                    canvas.height = image.height;
+                                }
+                                const ctx = canvas.getContext('2d');
+                                ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+                                setImg(canvas.toDataURL('image/jpeg', 0.6)); // Compress JPEG 60%
+                            };
+                            image.src = ev.target.result;
+                        };
+                        reader.readAsDataURL(file);
+                    }
+                };
+
+                return (
+                    <div className="text-center pt-10 pb-20 space-y-6">
+                        <div className="inline-block p-4 bg-emerald-500/10 rounded-full text-emerald-500"><Icon name="CheckCircle2" size={48}/></div>
+                        <h2 className="text-3xl font-bold">Training fertig!</h2>
+                        <Input label="Körpergewicht (kg)" value={bw} onChange={setBw} placeholder="80.5" />
+                        <div className="bg-zinc-900 border border-dashed border-zinc-800 rounded-2xl p-6">
+                            {img ? <div className="relative"><img src={img} className="rounded-xl"/><button onClick={() => setImg(null)} className="absolute top-2 right-2 bg-black/50 p-1 rounded-full"><Icon name="X" size={16}/></button></div> 
+                            : <label className="block p-4 text-zinc-400 text-sm cursor-pointer"><Icon name="Camera" className="mx-auto mb-2"/> Foto hinzufügen <input type="file" accept="image/*" onChange={handleImg} className="hidden"/></label>}
+                        </div>
+                        <Button onClick={() => saveHistory(img, bw)} className="w-full">Speichern</Button>
+                    </div>
+                );
+            };
+
+            const HistoryView = () => (
+                <div className="space-y-4">
+                    <div className="flex items-center gap-4 mb-4"><button onClick={() => setActiveView('list')} className="text-zinc-400"><Icon name="ChevronLeft" size={28}/></button><h2 className="text-2xl font-bold">Verlauf</h2></div>
+                    {history.map(h => (
+                        <div key={h.id} className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 flex gap-4 items-start">
+                            {h.image ? <img src={h.image} className="w-16 h-16 rounded bg-zinc-950 object-cover"/> : <div className="w-16 h-16 rounded bg-zinc-800 flex items-center justify-center text-zinc-600"><Icon name="Image"/></div>}
+                            <div>
+                                <div className="font-bold text-white">{h.planName}</div>
+                                <div className="text-xs text-zinc-400">{new Date(h.date).toLocaleDateString()}</div>
+                                <div className="mt-1 text-sm font-mono text-zinc-300">{formatTime(h.duration)} • {h.bodyWeight && h.bodyWeight + 'kg'}</div>
+                            </div>
+                        </div>
+                    ))}
+                    {history.length === 0 && <div className="text-center text-zinc-500 py-10">Kein Verlauf</div>}
+                </div>
+            );
+
+            const ProgressView = () => {
+                const bwData = history.filter(h => h.bodyWeight).map(h => ({ date: h.date, value: parseFloat(h.bodyWeight) })).reverse();
+                return (
+                    <div className="space-y-6">
+                        <div className="flex items-center gap-4 mb-4"><button onClick={() => setActiveView('list')} className="text-zinc-400"><Icon name="ChevronLeft" size={28}/></button><h2 className="text-2xl font-bold">Fortschritt</h2></div>
+                        <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+                            <h3 className="text-xs text-zinc-400 font-bold uppercase mb-4">Körpergewicht</h3>
+                            <SimpleChart data={bwData} color="#10b981" />
+                        </div>
+                        <div className="text-center text-zinc-500 text-sm">Weitere Charts folgen, wenn mehr Daten da sind.</div>
+                    </div>
+                );
+            };
+
+            return (
+                <div className="max-w-md mx-auto p-4 pb-10">
+                    {activeView === 'list' && <ListView />}
+                    {activeView === 'edit' && <EditView />}
+                    {activeView === 'active' && <ActiveView />}
+                    {activeView === 'summary' && <SummaryView />}
+                    {activeView === 'history' && <HistoryView />}
+                    {activeView === 'progress' && <ProgressView />}
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
